@@ -1,0 +1,366 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AWS SAM template for the remediation tool
+
+Resources:
+  # 1. MisconfiguredResources Table
+  MisconfiguredResourcesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MisconfiguredResources
+      AttributeDefinitions:
+        - AttributeName: ResourceID
+          AttributeType: S
+        - AttributeName: DetectedTimeGenerated
+          AttributeType: S
+        - AttributeName: ServiceType
+          AttributeType: S
+        - AttributeName: SeverityID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ResourceID
+          KeyType: HASH
+        - AttributeName: DetectedTimeGenerated
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ServiceTypeIndex
+          KeySchema:
+            - AttributeName: ServiceType
+              KeyType: HASH
+            - AttributeName: DetectedTimeGenerated
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: SeverityTimeIndex
+          KeySchema:
+            - AttributeName: SeverityID
+              KeyType: HASH
+            - AttributeName: DetectedTimeGenerated
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  # 2. SeverityLevels Table 
+  SeverityLevelsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: SeverityLevels
+      AttributeDefinitions:
+        - AttributeName: SeverityID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: SeverityID
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # 3. RemediationActions Table 
+  RemediationActionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: RemediationActions
+      AttributeDefinitions:
+        - AttributeName: RemediationID
+          AttributeType: S
+        - AttributeName: StartTime
+          AttributeType: S
+        - AttributeName: ResourceID
+          AttributeType: S
+        - AttributeName: RemediationStatus
+          AttributeType: S
+      KeySchema:
+        - AttributeName: RemediationID
+          KeyType: HASH
+        - AttributeName: StartTime
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ResourceRemediationIndex
+          KeySchema:
+            - AttributeName: ResourceID
+              KeyType: HASH
+            - AttributeName: StartTime
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: StatusTimeIndex
+          KeySchema:
+            - AttributeName: RemediationStatus
+              KeyType: HASH
+            - AttributeName: StartTime
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  # 4. CompletedRemediations Table 
+  CompletedRemediationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CompletedRemediations
+      AttributeDefinitions:
+        - AttributeName: CompletedRemediationID
+          AttributeType: S
+        - AttributeName: RemediationID
+          AttributeType: S
+        - AttributeName: CompletionTimestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: CompletedRemediationID
+          KeyType: HASH
+        - AttributeName: CompletionTimestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: RemediationCompletionIndex
+          KeySchema:
+            - AttributeName: RemediationID
+              KeyType: HASH
+            - AttributeName: CompletionTimestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  # 5. Notifications Table 
+  NotificationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Notifications
+      AttributeDefinitions:
+        - AttributeName: NotificationID
+          AttributeType: S
+        - AttributeName: NotificationSentTime
+          AttributeType: S
+        - AttributeName: ResourceID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: NotificationID
+          KeyType: HASH
+        - AttributeName: NotificationSentTime
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ResourceNotificationIndex
+          KeySchema:
+            - AttributeName: ResourceID
+              KeyType: HASH
+            - AttributeName: NotificationSentTime
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+
+  # 6. ComplianceDefinitions Table 
+  ComplianceDefinitionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ComplianceDefinitions
+      AttributeDefinitions:
+        - AttributeName: ServiceType
+          AttributeType: S
+        - AttributeName: ComplianceID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ServiceType
+          KeyType: HASH
+        - AttributeName: ComplianceID
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  # API Gateway with CORS and Explicit Methods
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowOrigin: "'http://localhost:3000'"
+        MaxAge: "'600'"
+      EndpointConfiguration: REGIONAL
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: 'Remediation API'
+        paths:
+          /remediations:
+            get:
+              x-amazon-apigateway-integration:
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRemediationsFunction.Arn}/invocations"
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                "200":
+                  description: "200 response"
+            post:
+              x-amazon-apigateway-integration:
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateRemediationFunction.Arn}/invocations"
+                passthroughBehavior: when_no_match
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                "200":
+                  description: "200 response"
+            options:
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{"statusCode": 200}'
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Origin: "'http://localhost:3000'"
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Origin:
+                      type: "string"
+
+  # Lambda Functions
+  GetRemediationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: get_remediations.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MisconfiguredResourcesTable
+      Events:
+        GetRemediationsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /remediations
+            Method: GET
+
+  CreateRemediationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: create_remediation.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MisconfiguredResourcesTable
+      Events:
+        CreateRemediationApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /remediations
+            Method: POST
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Join 
+      - ''
+      - - 'https://'
+        - !Ref ApiGatewayApi
+        - '.execute-api.'
+        - !Ref AWS::Region
+        - '.amazonaws.com/Prod'
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+
+  # DynamoDB Table Names
+  MisconfiguredResourcesTableName:
+    Description: MisconfiguredResources table name
+    Value: !Ref MisconfiguredResourcesTable
+    Export:
+      Name: !Sub "${AWS::StackName}-MisconfiguredResourcesTable"
+
+  SeverityLevelsTableName:
+    Description: SeverityLevels table name
+    Value: !Ref SeverityLevelsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-SeverityLevelsTable"
+
+  RemediationActionsTableName:
+    Description: RemediationActions table name
+    Value: !Ref RemediationActionsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-RemediationActionsTable"
+
+  CompletedRemediationsTableName:
+    Description: CompletedRemediations table name
+    Value: !Ref CompletedRemediationsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-CompletedRemediationsTable"
+
+  NotificationsTableName:
+    Description: Notifications table name
+    Value: !Ref NotificationsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationsTable"
+
+  ComplianceDefinitionsTableName:
+    Description: ComplianceDefinitions table name
+    Value: !Ref ComplianceDefinitionsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ComplianceDefinitionsTable"
+
+  # Table ARNs (useful for IAM policies)
+  MisconfiguredResourcesTableArn:
+    Description: MisconfiguredResources table ARN
+    Value: !GetAtt MisconfiguredResourcesTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-MisconfiguredResourcesTableArn"
+
+  RemediationActionsTableArn:
+    Description: RemediationActions table ARN
+    Value: !GetAtt RemediationActionsTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-RemediationActionsTableArn"
+
+  # API Resources
+  GetRemediationsApi:
+    Description: API Gateway GET remediations endpoint
+    Value: !Join 
+      - ''
+      - - 'https://'
+        - !Ref ApiGatewayApi
+        - '.execute-api.'
+        - !Ref AWS::Region
+        - '.amazonaws.com/Prod/remediations'
+    Export:
+      Name: !Sub "${AWS::StackName}-GetRemediationsApi"
+
+  CreateRemediationApi:
+    Description: API Gateway POST remediation endpoint
+    Value: !Join 
+      - ''
+      - - 'https://'
+        - !Ref ApiGatewayApi
+        - '.execute-api.'
+        - !Ref AWS::Region
+        - '.amazonaws.com/Prod/remediations'
+    Export:
+      Name: !Sub "${AWS::StackName}-CreateRemediationApi"
+
+  # Stack Information
+  StackRegion:
+    Description: Region where the stack is deployed
+    Value: !Ref AWS::Region
+    Export:
+      Name: !Sub "${AWS::StackName}-Region"
+
+  StackName:
+    Description: Name of the stack
+    Value: !Ref AWS::StackName
+    Export:
+      Name: !Sub "${AWS::StackName}-Name"
