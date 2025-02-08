@@ -63,7 +63,7 @@ class NotificationHandler:
                     please contact the security team.
                 """.strip()
             }
-            self._store_notification(
+            self.storeNotification(
                 notification_id=notificationId,
                 resource_id=resourceId,
                 notification_type="REMEDIATION_SCHEDULED",
@@ -72,7 +72,7 @@ class NotificationHandler:
             )
              
             # Send SNS Notification
-            self._send_notification(message, resourceOwner)
+            self.sendNotification(message, resourceOwner)
 
             return notificationId
         except Exception as e:
@@ -117,7 +117,7 @@ class NotificationHandler:
             }
 
             # Store notification record
-            self._store_notification(
+            self.storeNotification(
                 notification_id=notificationId,
                 resource_id=resourceId,
                 notification_type="REMEDIATION_COMPLETE",
@@ -126,7 +126,7 @@ class NotificationHandler:
             )
 
             # Send SNS notification
-            self._send_notification(message, resourceOwner)
+            self.sendNotification(message, resourceOwner)
 
             return notificationId
 
@@ -148,7 +148,7 @@ class NotificationHandler:
             str: The notification ID
         """
         try:
-            notificationId = f"notif-failed-{resourceId}"-{(int(datetime.now(timezone.utc).timestamp()))}
+            notificationId = f"notif-failed-{resourceId}-{(int(datetime.now(timezone.utc).timestamp()))}"
             subject = f"Remediation Failed for {serviceType} Resource: {resourceId}"
 
             message = {
@@ -169,7 +169,7 @@ class NotificationHandler:
             }
 
             # Store notification record
-            self._store_notification(
+            self.storeNotification(
                 notification_id=notificationId,
                 resource_id=resourceId,
                 notification_type="REMEDIATION_FAILED",
@@ -178,7 +178,7 @@ class NotificationHandler:
             )
 
             # Send SNS notification with high priority
-            self._send_notification(
+            self.sendNotification(
                 message,
                 resourceOwner,
                 attributes={'Priority': {'DataType': 'String', 'StringValue': 'HIGH'}}
@@ -192,12 +192,19 @@ class NotificationHandler:
 
     def storeNotification(self, notificationId: str, resourceId: str, notificationType: str, ownerInfo: Dict[str, str], message: Dict[str, str]) -> None:
         """
-        writes the notification record to the DynamoDB database
-        """
+    Writes the notification record to the DynamoDB database.
+    
+    Args:
+        notificationId: Unique identifier for the notification
+        resourceId: ID of the affected resource
+        notificationType: Type of notification being stored
+        ownerInfo: Dictionary containing owner details
+        message: Dictionary containing subject and body of notification
+    """
         try:
             item = {
                 'NotificationID': notificationId,
-                'NotificationSentTime': datetime.now(timezone.utc).isoformat,
+                'NotificationSentTime': datetime.now(timezone.utc).isoformat(),
                 'ResourceID': resourceId,
                 'NotificationType': notificationType,
                 'OwnerEmail': ownerInfo.get('email'),
@@ -212,9 +219,14 @@ class NotificationHandler:
             logger.error(f"Failed to store the notification record: {str(e)}")
             raise
 
-    def sendNotifications(self, message: Dict[str, str],ownerInfo: Dict[str, str], attributes: Dict[str, Dict[str, str]] = None) -> None:
+    def sendNotification(self, message: Dict[str, str], ownerInfo: Dict[str, str], attributes: Dict[str, Dict[str, str]] = None) -> None:
         """
         Send notification via SNS
+
+        Args:
+        message: Dictionary containing notification subject and body
+        ownerInfo: Dictionary containing owner email and team info
+        attributes: Optional dictionary of additional SNS message attributes
         """
         try:
             if not ownerInfo.get('email'):
