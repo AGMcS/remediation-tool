@@ -64,7 +64,7 @@ class RemediationScheduler:
                     # Get the appropriate Lambda ARN
                     remediationLambda = self.remediationMap.get(complianceId)
                     if not remediationLambda:
-                        raise ValueError(f"No remediation Lambda found for compliance ID: {compliance_id}")
+                        raise ValueError(f"No remediation Lambda found for compliance ID: {complianceId}")
 
                     # Prepare the event for the remediation Lambda
                     event = {
