@@ -210,3 +210,40 @@ class DbHandler:
         except ClientError as e:
             logger.error(f"Failed to get resource history: {str(e)}")
             raise
+
+    def updateRemediationStatus(self, remediationId: str, status: str, details: Dict[str, Any] = None) -> None:
+        """
+        Updates the status of a remediation action in the RemediationActions table.
+        Will add any extra details about the change of status.
+
+        Args:
+            remediation_id: The unique identifier of the remediation action
+            status: The new status to set (e.g., 'IN_PROGRESS', 'COMPLETED', 'FAILED')
+            details: Optional dictionary containing additional information about the status change
+        """
+        try:
+            # Start with basic update attritube
+            updateAttribute = 'SET RemediationStatus = :status'
+            attributeValues = {':status': status}
+
+            # If details are provided, add them to the update
+            if details:
+                updateAttribute += ', StatusDetails = :details'
+                attributeValues[':details'] = details
+
+            # Add last updated timestamp
+            updateAttribute += ', LastUpdated = :timestamp'
+            attributeValues[':timestamp'] = datetime.now(timezone.utc).isoformat()
+
+            # Perform the update
+            self.remediationTable.update_item(
+                Key={'RemediationID': remediationId},
+                UpdateExpression=updateAttribute,
+                ExpressionAttributeValues=attributeValues
+            )
+
+            logger.info(f"Updated remediation {remediationId} status to {status}")
+
+        except ClientError as e:
+            logger.error(f"Failed to update remediation status: {str(e)}")
+            raise
