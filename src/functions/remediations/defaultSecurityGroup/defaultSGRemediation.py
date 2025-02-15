@@ -1,10 +1,7 @@
 import boto3
-import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Dict, Any
-from botocore.exceptions import ClientError
 from common.dbHandler import DbHandler
 from common.notificationHandler import NotificationHandler
 from common.awsUtils import AWSServiceHandler
