@@ -4,8 +4,8 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Dict, Any
-from common.dbHandler import DbHandler
-from common.notificationHandler import NotificationHandler
+from dbHandler import DbHandler
+from notificationHandler import NotificationHandler
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -123,18 +123,18 @@ class RemediationScheduler:
                 }
             }
         
-    def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-        """
-        Lambda will be triggered by EventBridge rule every 5 minutes
-        """
-        try:
-            remediationScheduler = RemediationScheduler()
-            return remediationScheduler.processScheduledRemediatiom()
-        except Exception as e:
-            logger.error(f"Error in lambdaHandler: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': {
-                    'error': str(e)
-                }
+def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Lambda will be triggered by EventBridge rule every 5 minutes
+    """
+    try:
+        remediationScheduler = RemediationScheduler()
+        return remediationScheduler.processScheduledRemediatiom()
+    except Exception as e:
+        logger.error(f"Error in lambdaHandler: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': str(e)
             }
+        }

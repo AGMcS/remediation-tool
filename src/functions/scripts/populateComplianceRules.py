@@ -1,5 +1,4 @@
 import boto3
-import json
 import logging
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
@@ -14,10 +13,9 @@ class ComplianceRulePopulator:
         self.table = self.dynamodb.Table('ComplianceDefinitions')
 
     def populateRules(self):
-        """Populate the compliance rules table with predefined CIS rules"""
-        # Define the compliance rules
+        """Populate the compliance rules table with the four core CIS rules we're implementing"""
         complianceRules = [
-            # 1) S3 Encryption Rule
+            # 1) S3 Public Access Rule (CIS-2.1.5)
             {
                 "ServiceType": "S3",
                 "ComplianceID": "CIS-2.1.5",
@@ -52,41 +50,8 @@ class ComplianceRulePopulator:
                 },
                 "LastUpdated": datetime.now(timezone.utc).isoformat()
             },
-            # 2) S3 Versioning Rule
-            {
-                "ServiceType": "S3",
-                "ComplianceID": "CIS-2.1.6",
-                "Title": "S3 Versioning",
-                "Description": "Ensure S3 bucket versioning is enabled",
-                "RiskLevel": "HIGH",
-                "Framework": {
-                    "Name": "CIS",
-                    "Version": "1.4.0",
-                    "Category": "Storage",
-                    "SubCategory": "Data Protection"
-                },
-                "DetectionPattern": {
-                    "EventSource": "s3.amazonaws.com",
-                    "EventName": ["CreateBucket", "PutBucketVersioning"],
-                    "EvaluationCriteria": {
-                        "Parameter": "VersioningConfiguration.Status",
-                        "ExpectedValue": "Enabled"
-                    }
-                },
-                "RemediationSteps": [
-                    "Check current versioning status",
-                    "Enable versioning on the bucket",
-                    "Verify versioning status after update"
-                ],
-                "AutomationConfig": {
-                    "CanAutoRemediate": True,
-                    "PreRequisites": [],
-                    "RollbackSupported": False,
-                    "RequiresApproval": False
-                },
-                "LastUpdated": datetime.now(timezone.utc).isoformat()
-            },
-            # 3) EBS Encryption Rule
+            
+            # 2) EBS Encryption Rule (CIS-2.2.1)
             {
                 "ServiceType": "EC2",
                 "ComplianceID": "CIS-2.2.1",
@@ -122,78 +87,9 @@ class ComplianceRulePopulator:
                 },
                 "LastUpdated": datetime.now(timezone.utc).isoformat()
             },
-            # 4) Security Group Rule
+
+            # 3) Default VPC Security Group Rule (CIS-4.2)
             {
-                "ServiceType": "EC2",
-                "ComplianceID": "CIS-4.1",
-                "Title": "Security Group Ingress",
-                "Description": "Ensure no security group allows ingress from 0.0.0.0/0 to port 22",
-                "RiskLevel": "CRITICAL",
-                "Framework": {
-                    "Name": "CIS",
-                    "Version": "1.4.0",
-                    "Category": "Network Security",
-                    "SubCategory": "Access Control"
-                },
-                "DetectionPattern": {
-                    "EventSource": "ec2.amazonaws.com",
-                    "EventName": ["AuthorizeSecurityGroupIngress"],
-                    "EvaluationCriteria": {
-                        "Parameter": "IpRanges",
-                        "ExpectedValue": "NOT_0.0.0.0/0",
-                        "Ports": [22]
-                    }
-                },
-                "RemediationSteps": [
-                    "Identify security group with open SSH access",
-                    "Document existing rules for rollback if needed",
-                    "Remove 0.0.0.0/0 ingress rule for port 22",
-                    "Verify rule removal and security group update"
-                ],
-                "AutomationConfig": {
-                    "CanAutoRemediate": True,
-                    "PreRequisites": [],
-                    "RollbackSupported": True,
-                    "RequiresApproval": True
-                },
-                "LastUpdated": datetime.now(timezone.utc).isoformat()
-            },
-            # 5) KMS Key Rotation Rule
-            {
-                "ServiceType": "KMS",
-                "ComplianceID": "CIS-2.8",
-                "Title": "KMS Key Rotation",
-                "Description": "Ensure rotation for customer created CMKs is enabled",
-                "RiskLevel": "MEDIUM",
-                "Framework": {
-                    "Name": "CIS",
-                    "Version": "1.4.0",
-                    "Category": "Encryption",
-                    "SubCategory": "Key Management"
-                },
-                "DetectionPattern": {
-                    "EventSource": "kms.amazonaws.com",
-                    "EventName": ["CreateKey", "DisableKeyRotation"],
-                    "EvaluationCriteria": {
-                        "Parameter": "KeyRotationEnabled",
-                        "ExpectedValue": True
-                    }
-                },
-                "RemediationSteps": [
-                    "Identify KMS key without rotation enabled",
-                    "Enable automatic key rotation",
-                    "Verify rotation setting is active"
-                ],
-                "AutomationConfig": {
-                    "CanAutoRemediate": True,
-                    "PreRequisites": [],
-                    "RollbackSupported": True,
-                    "RequiresApproval": False
-                },
-                "LastUpdated": datetime.now(timezone.utc).isoformat()
-            },
-            # 5) Restrict traffic to default security group Rule
-           {
                 "ServiceType": "EC2",
                 "ComplianceID": "CIS-4.2",
                 "Title": "Default VPC Security Group",
@@ -229,7 +125,7 @@ class ComplianceRulePopulator:
                 "LastUpdated": datetime.now(timezone.utc).isoformat()
             },
 
-            # 6) Block Public RDS Rule
+            # 4) Block Public RDS Rule (CIS-2.3.2)
             {
                 "ServiceType": "RDS",
                 "ComplianceID": "CIS-2.3.2",
@@ -263,83 +159,10 @@ class ComplianceRulePopulator:
                     "RequiresApproval": True
                 },
                 "LastUpdated": datetime.now(timezone.utc).isoformat()
-            },
-            # 7) Remove unused IAM roles Rule
-            {
-                "ServiceType": "IAM",
-                "ComplianceID": "SEC-1.8",
-                "Title": "IAM Role Last Used",
-                "Description": "Ensure unused IAM roles are identified and removed",
-                "RiskLevel": "MEDIUM",
-                "Framework": {
-                    "Name": "Security Best Practices",
-                    "Version": "1.0.0",
-                    "Category": "Access Management",
-                    "SubCategory": "Role Cleanup"
-                },
-                "DetectionPattern": {
-                    "EventSource": "iam.amazonaws.com",
-                    "EventName": ["GenerateServiceLastAccessedDetails"],
-                    "EvaluationCriteria": {
-                        "Parameter": "LastUsedDate",
-                        "ExpectedValue": "90",
-                        "Comparison": "DaysNotUsed"
-                    }
-                },
-                "RemediationSteps": [
-                    "Identify unused roles",
-                    "Document role configurations",
-                    "Remove unused roles",
-                    "Update dependencies"
-                ],
-                "AutomationConfig": {
-                    "CanAutoRemediate": False,
-                    "PreRequisites": [],
-                    "RollbackSupported": True,
-                    "RequiresApproval": True
-                },
-                "LastUpdated": datetime.now(timezone.utc).isoformat()
-            },
-
-            # 8) Remove unused Security Groups Rule
-            {
-                "ServiceType": "EC2",
-                "ComplianceID": "SEC-2.4",
-                "Title": "Security Group Unused",
-                "Description": "Ensure unused security groups are identified and removed",
-                "RiskLevel": "LOW",
-                "Framework": {
-                    "Name": "Security Best Practices",
-                    "Version": "1.0.0",
-                    "Category": "Network Security",
-                    "SubCategory": "Resource Cleanup"
-                },
-                "DetectionPattern": {
-                    "EventSource": "ec2.amazonaws.com",
-                    "EventName": ["DescribeSecurityGroups"],
-                    "EvaluationCriteria": {
-                        "Parameter": "References",
-                        "ExpectedValue": "0",
-                        "Comparison": "Equals"
-                    }
-                },
-                "RemediationSteps": [
-                    "Identify security groups with no references",
-                    "Document group configurations",
-                    "Remove unused groups",
-                    "Verify no impacts"
-                ],
-                "AutomationConfig": {
-                    "CanAutoRemediate": True,
-                    "PreRequisites": [],
-                    "RollbackSupported": True,
-                    "RequiresApproval": False
-                },
-                "LastUpdated": datetime.now(timezone.utc).isoformat()
             }
         ]
 
-        #Write rules to DynamoDB
+        # Write rules to DynamoDB
         for rule in complianceRules:
             try:
                 self.table.put_item(Item=rule)
@@ -355,16 +178,18 @@ class ComplianceRulePopulator:
             rules = response['Items']
             logger.info(f"Found {len(rules)} compliance rules in the table")
 
-            # print summary of each Rule
+            # Print summary of each rule
             for rule in rules:
                 logger.info(f"Rule {rule['ComplianceID']}: {rule['Title']} - {rule['RiskLevel']}")
-
             return rules
         except ClientError as e:
             logger.error(f"Error verifying rules: {str(e)}")
             raise
-    
+
 def main():
+    """
+    This function is used for direct execution (e.g., python populateComplianceRules.py).
+    """
     try:
         populator = ComplianceRulePopulator()
 
@@ -378,8 +203,16 @@ def main():
 
         logger.info("Compliance rule population completed successfully!")
     except Exception as e:
-            logger.error(f"Aws error occurred: {str(e)}")
-            raise
+        logger.error(f"AWS error occurred: {str(e)}")
+        raise
+
+def lambdaHandler(event, context):
+    """
+    AWS Lambda entry point.
+    If your SAM template references `populateComplianceRules.lambdaHandler`,
+    Lambda calls this function.
+    """
+    main()
 
 if __name__ == "__main__":
-     main()
+    main()

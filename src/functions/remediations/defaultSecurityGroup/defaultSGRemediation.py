@@ -2,9 +2,9 @@ import boto3
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
-from common.dbHandler import DbHandler
-from common.notificationHandler import NotificationHandler
-from common.awsUtils import AWSServiceHandler
+from dbHandler import DbHandler
+from notificationHandler import NotificationHandler
+from awsUtils import AWSServiceHandler
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -169,20 +169,20 @@ class DefaultSGRemediationHandler:
             logger.error(f"Error getting VPC owner info: {str(e)}")
             return {'email': None, 'team': 'Unknown'}
         
-    def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-        """
-        Lambda entry point for default security group remediation.
-        Triggered by the remediation scheduler when a remediation is due.
-        """
-        try: 
-            handler = DefaultSGRemediationHandler()
-            return handler.defaultSGRemediation(event)
-        except Exception as e:
-            logger.error(f"Error in the lambda handler for default security groups: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': {
-                    'error': str(e)
-                }
+def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Lambda entry point for default security group remediation.
+    Triggered by the remediation scheduler when a remediation is due.
+    """
+    try: 
+        handler = DefaultSGRemediationHandler()
+        return handler.defaultSGRemediation(event)
+    except Exception as e:
+        logger.error(f"Error in the lambda handler for default security groups: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': str(e)
             }
+        }
         

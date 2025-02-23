@@ -1,9 +1,41 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS SAM template for the remediation tool
+
+Description: >
+  AWS remediation tool infrastructure including:
+  - 6 DynamoDB tables for storing compliance and remediation data
+  - 4 core remediation Lambdas
+  - Detection and scheduling components
+  - API Gateway for frontend integration
+  - EventBridge rules for automated detection
+  - SNS notifications for alerts
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 128
 
 Resources:
-  # 1. MisconfiguredResources Table
+  # -------------------------------------------------------------------------------------
+  # DynamoDB Tables
+  # -------------------------------------------------------------------------------------
+  ComplianceDefinitionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ComplianceDefinitions
+      AttributeDefinitions:
+        - AttributeName: ServiceType
+          AttributeType: S
+        - AttributeName: ComplianceID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ServiceType
+          KeyType: HASH
+        - AttributeName: ComplianceID
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
   MisconfiguredResourcesTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -41,7 +73,6 @@ Resources:
             ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
 
-  # 2. SeverityLevels Table 
   SeverityLevelsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -54,7 +85,6 @@ Resources:
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
 
-  # 3. RemediationActions Table 
   RemediationActionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -92,7 +122,6 @@ Resources:
             ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
 
-  # 4. CompletedRemediations Table 
   CompletedRemediationsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -120,7 +149,6 @@ Resources:
             ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
 
-  # 5. Notifications Table 
   NotificationsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -148,219 +176,583 @@ Resources:
             ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
 
-  # 6. ComplianceDefinitions Table 
-  ComplianceDefinitionsTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: ComplianceDefinitions
-      AttributeDefinitions:
-        - AttributeName: ServiceType
-          AttributeType: S
-        - AttributeName: ComplianceID
-          AttributeType: S
-      KeySchema:
-        - AttributeName: ServiceType
-          KeyType: HASH
-        - AttributeName: ComplianceID
-          KeyType: RANGE
-      BillingMode: PAY_PER_REQUEST
-
-  # API Gateway with CORS and Explicit Methods
+  # -------------------------------------------------------------------------------------
+  # API Gateway Definition
+  # -------------------------------------------------------------------------------------
   ApiGatewayApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: Prod
-      Cors:
-        AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
-        AllowOrigin: "'http://localhost:3000'"
-        MaxAge: "'600'"
-      EndpointConfiguration: REGIONAL
-      DefinitionBody:
-        swagger: '2.0'
-        info:
-          title: 'Remediation API'
-        paths:
-          /remediations:
-            get:
-              x-amazon-apigateway-integration:
-                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRemediationsFunction.Arn}/invocations"
-                passthroughBehavior: when_no_match
-                httpMethod: POST
-                type: aws_proxy
-              responses:
-                "200":
-                  description: "200 response"
-            post:
-              x-amazon-apigateway-integration:
-                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateRemediationFunction.Arn}/invocations"
-                passthroughBehavior: when_no_match
-                httpMethod: POST
-                type: aws_proxy
-              responses:
-                "200":
-                  description: "200 response"
-            options:
-              x-amazon-apigateway-integration:
-                type: mock
-                requestTemplates:
-                  application/json: '{"statusCode": 200}'
+      Type: AWS::Serverless::Api
+      Properties:
+        Name: RemediationToolAPI
+        StageName: Prod
+        Cors: 
+          AllowMethods: "'GET,POST,OPTIONS'"
+          AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With'"
+          AllowOrigin: "'http://localhost:3000'"
+          MaxAge: "'600'"
+        EndpointConfiguration: REGIONAL
+        Auth:
+          DefaultAuthorizer: NONE
+          ApiKeyRequired: false 
+        DefinitionBody:
+          openapi: "3.0.1"
+          info:
+            title: "Remediation Tool API"
+            version: "1.0.0"
+          paths:
+            /dashboard:
+              get:
+                summary: "Get dashboard data"
+                x-amazon-apigateway-integration:
+                  uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DashboardDataFunction.Arn}/invocations"
+                  passthroughBehavior: when_no_match
+                  httpMethod: POST
+                  type: aws_proxy
                 responses:
-                  default:
-                    statusCode: "200"
-                    responseParameters:
-                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
-                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
-                      method.response.header.Access-Control-Allow-Origin: "'http://localhost:3000'"
-              responses:
-                "200":
-                  description: "200 response"
-                  headers:
-                    Access-Control-Allow-Headers:
-                      type: "string"
-                    Access-Control-Allow-Methods:
-                      type: "string"
-                    Access-Control-Allow-Origin:
-                      type: "string"
+                  "200":
+                    description: "Success"
+                  "500":
+                    description: "Error"
+            
+            /remediations/scheduled:
+              get:
+                summary: "Get scheduled remediations"
+                x-amazon-apigateway-integration:
+                  uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScheduledRemediationsFunction.Arn}/invocations"
+                  passthroughBehavior: when_no_match
+                  httpMethod: POST
+                  type: aws_proxy
+                responses:
+                  "200":
+                    description: "Success"
+                  "500":
+                    description: "Error"
+            
+            /remediations/historical:
+              get:
+                summary: "Get historical remediations"
+                x-amazon-apigateway-integration:
+                  uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HistoricalRemediationsFunction.Arn}/invocations"
+                  passthroughBehavior: when_no_match
+                  httpMethod: POST
+                  type: aws_proxy
+                responses:
+                  "200":
+                    description: "Success"
+                  "500":
+                    description: "Error"
 
-  # Lambda Functions
-  GetRemediationsFunction:
+  # -------------------------------------------------------------------------------------
+  # Detection and Scheduling Components
+  # -------------------------------------------------------------------------------------
+  DetectionLambda:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
-      Handler: get_remediations.lambda_handler
-      Runtime: python3.12
+      FunctionName: complianceDetection
+      CodeUri: src/functions/detection/
+      Handler: handlers/detectionHandler.lambdaHandler
+      Role: !GetAtt RemediationLambdaExecutionRole.Arn
+      Description: "Handles initial detection of compliance violations"
       Environment:
         Variables:
           MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          SEVERITY_TABLE: !Ref SeverityLevelsTable
+          NOTIFICATION_TOPIC: !Ref RemediationNotificationTopic
+
+  RemediationSchedulerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: RemediationSchedulerRule
+      Description: "Triggers remediation scheduler every 5 minutes"
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt RemediationSchedulerLambda.Arn
+          Id: "RemediationSchedulerTarget"
+
+  RemediationSchedulerLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: remediationScheduler
+      CodeUri: src/functions/scheduler/
+      Handler: remediationScheduler.lambdaHandler
+      Role: !GetAtt RemediationLambdaExecutionRole.Arn
+      Description: "Checks for and triggers due remediations"
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          COMPLETED_TABLE: !Ref CompletedRemediationsTable
+          NOTIFICATION_TOPIC: !Ref RemediationNotificationTopic
+
+  # -------------------------------------------------------------------------------------
+  # Compliance Rule Population Components
+  # -------------------------------------------------------------------------------------
+  ComplianceRulePopulationLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: complianceRulePopulator
+      CodeUri: src/functions/scripts/
+      Handler: populateComplianceRules.lambdaHandler
+      Role: !GetAtt CompliancePopulatorRole.Arn
+      Description: "Populates initial compliance rules in DynamoDB"
+      Environment:
+        Variables:
+          COMPLIANCE_TABLE_NAME: !Ref ComplianceDefinitionsTable
+      Timeout: 300  # 5 minutes to allow for all rules to be populated
+
+  CompliancePopulatorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CompliancePopulatorRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - DynamoDBReadPolicy:
-            TableName: !Ref MisconfiguredResourcesTable
+        - PolicyName: ComplianceTableAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Scan
+                Resource: !GetAtt ComplianceDefinitionsTable.Arn
+
+  # -------------------------------------------------------------------------------------
+  # EventBridge Rule Creation Components
+  # -------------------------------------------------------------------------------------
+  CreateEventBridgeRulesRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CreateEventBridgeRulesRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                Resource: !GetAtt ComplianceDefinitionsTable.Arn
+        - PolicyName: EventBridgeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:DeleteRule
+                  - events:RemoveTargets
+                Resource: "*"
+        - PolicyName: LambdaInvokePermission
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                Resource:
+                  - !GetAtt RemediationLambdaDefaultSg.Arn
+                  - !GetAtt RemediationLambdaEbsEncryption.Arn
+                  - !GetAtt RemediationLambdaS3PublicAccess.Arn
+                  - !GetAtt RemediationLambdaRdsPublicAccess.Arn
+
+  CreateEventBridgeRulesLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: createEventbridgeRules
+      CodeUri: src/functions/eventBridgeSetup/
+      Handler: createEventBridgeRules.lambdaHandler
+      Role: !GetAtt CreateEventBridgeRulesRole.Arn
+      Description: "Creates EventBridge rules based on compliance definitions"
+      Environment:
+        Variables:
+          COMPLIANCE_TABLE_NAME: !Ref ComplianceDefinitionsTable
+          LAMBDA_MAPPING: !Sub |
+            {
+              "CIS-4.2": "${RemediationLambdaDefaultSg.Arn}",
+              "CIS-2.2.1": "${RemediationLambdaEbsEncryption.Arn}",
+              "CIS-2.1.5": "${RemediationLambdaS3PublicAccess.Arn}",
+              "CIS-2.3.2": "${RemediationLambdaRdsPublicAccess.Arn}"
+            }
+
+  # -------------------------------------------------------------------------------------
+  # Orchestration of Rule Creation
+  # -------------------------------------------------------------------------------------
+  ComplianceRuleSetupCustomResource:
+    Type: Custom::ComplianceSetup
+    Properties:
+      ServiceToken: !GetAtt ComplianceRulePopulationLambda.Arn
+    DependsOn:
+      - ComplianceDefinitionsTable
+
+  CreateEventBridgeRulesCustomResource:
+    Type: Custom::CreateEBRules
+    Properties:
+      ServiceToken: !GetAtt CreateEventBridgeRulesLambda.Arn
+    DependsOn:
+      - ComplianceRuleSetupCustomResource  # Ensures compliance rules are populated first
+      - ComplianceDefinitionsTable
+      - RemediationLambdaDefaultSg
+      - RemediationLambdaEbsEncryption
+      - RemediationLambdaS3PublicAccess
+      - RemediationLambdaRdsPublicAccess
+
+  # -------------------------------------------------------------------------------------
+  # Core Remediation Lambdas
+  # -------------------------------------------------------------------------------------
+
+  # Default Security Group Remediation (CIS-4.2)
+  RemediationLambdaDefaultSg:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: remediationLambdaDefaultSg
+      CodeUri: src/functions/remediations/defaultSecurityGroup/
+      Handler: defaultSGRemediation.lambdaHandler
+      Role: !GetAtt RemediationLambdaExecutionRole.Arn
+      Description: "Remediates default Security Group open access (CIS-4.2)"
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          COMPLETED_TABLE: !Ref CompletedRemediationsTable
+          NOTIFICATION_TOPIC: !Ref RemediationNotificationTopic
+
+  # EBS Encryption Remediation (CIS-2.2.1)
+  RemediationLambdaEbsEncryption:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: remediationLambdaEbsEncryption
+      CodeUri: src/functions/remediations/ebsEncryption/
+      Handler: ebsEncryptionRemediation.lambdaHandler
+      Role: !GetAtt RemediationLambdaExecutionRole.Arn
+      Description: "Remediates EBS volume encryption noncompliance (CIS-2.2.1)"
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          COMPLETED_TABLE: !Ref CompletedRemediationsTable
+          NOTIFICATION_TOPIC: !Ref RemediationNotificationTopic
+
+  # S3 Public Access Remediation (CIS-2.1.5)
+  RemediationLambdaS3PublicAccess:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: remediationLambdaS3PublicAccess
+      CodeUri: src/functions/remediations/s3Encryption/
+      Handler: s3PublicAccessRemediation.lambdaHandler
+      Role: !GetAtt RemediationLambdaExecutionRole.Arn
+      Description: "Remediates S3 public access violations (CIS-2.1.5)"
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          COMPLETED_TABLE: !Ref CompletedRemediationsTable
+          NOTIFICATION_TOPIC: !Ref RemediationNotificationTopic
+
+  # RDS Public Access Remediation (CIS-2.3.2)
+  RemediationLambdaRdsPublicAccess:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: remediationLambdaRdsPublicAccess
+      CodeUri: src/functions/remediations/rdsPublic/
+      Handler: rdsPublicAccessRemediation.lambdaHandler
+      Role: !GetAtt RemediationLambdaExecutionRole.Arn
+      Description: "Remediates RDS public access noncompliance (CIS-2.3.2)"
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          COMPLETED_TABLE: !Ref CompletedRemediationsTable
+          NOTIFICATION_TOPIC: !Ref RemediationNotificationTopic
+
+  # -------------------------------------------------------------------------------------
+  # Frontend API Lambdas
+  # -------------------------------------------------------------------------------------
+
+  # Dashboard Data API Lambda
+  DashboardDataFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getDashboardData
+      CodeUri: src/functions/api/dashboard/
+      Handler: getDashboardData.lambdaHandler
+      Role: !GetAtt APILambdaExecutionRole.Arn
+      Description: "Retrieves dashboard data for frontend display"
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          COMPLETED_TABLE: !Ref CompletedRemediationsTable
+          NOTIFICATION_TABLE: !Ref NotificationsTable
       Events:
-        GetRemediationsApi:
+        DashboardAPI:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGatewayApi
-            Path: /remediations
+            Path: /dashboard
             Method: GET
 
-  CreateRemediationFunction:
+  # Scheduled Remediations API Lambda
+  ScheduledRemediationsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: src/
-      Handler: create_remediation.lambda_handler
-      Runtime: python3.12
+      FunctionName: getScheduledRemediations
+      CodeUri: src/functions/api/scheduled/
+      Handler: getScheduledRemediations.lambdaHandler
+      Role: !GetAtt APILambdaExecutionRole.Arn
+      Description: "Retrieves scheduled remediations data for frontend display"
       Environment:
         Variables:
           MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          SEVERITY_TABLE: !Ref SeverityLevelsTable
       Events:
-        CreateRemediationApi:
+        ScheduledAPI:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGatewayApi
-            Path: /remediations
-            Method: POST
+            Path: /remediations/scheduled
+            Method: GET
 
+  # Historical Remediations API Lambda
+  HistoricalRemediationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: getHistoricalRemediations
+      CodeUri: src/functions/api/historical/
+      Handler: getHistoricalRemediations.lambdaHandler
+      Role: !GetAtt APILambdaExecutionRole.Arn
+      Description: "Retrieves historical remediation data for frontend display"
+      Environment:
+        Variables:
+          MISCONFIG_TABLE: !Ref MisconfiguredResourcesTable
+          REMEDIATION_TABLE: !Ref RemediationActionsTable
+          COMPLETED_TABLE: !Ref CompletedRemediationsTable
+      Events:
+        HistoricalAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /remediations/historical
+            Method: GET
+
+
+  # -------------------------------------------------------------------------------------
+  # SNS Topics for Notifications
+  # -------------------------------------------------------------------------------------
+  RemediationNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: RemediationNotifications
+      DisplayName: "AWS Remediation Tool Notifications"
+      KmsMasterKeyId: "alias/aws/sns"
+
+  # -------------------------------------------------------------------------------------
+  # IAM Roles and Policies
+  # -------------------------------------------------------------------------------------
+  RemediationLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: RemediationLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: RemediationPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt MisconfiguredResourcesTable.Arn
+                  - !GetAtt RemediationActionsTable.Arn
+                  - !GetAtt CompletedRemediationsTable.Arn
+                  - !GetAtt SeverityLevelsTable.Arn
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref RemediationNotificationTopic
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketTagging
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:PutBucketPublicAccessBlock
+                  - ec2:DescribeVolumes
+                  - ec2:CreateSnapshot
+                  - ec2:CreateVolume
+                  - ec2:DeleteVolume
+                  - ec2:DescribeVpcs
+                  - ec2:RevokeSecurityGroupIngress
+                  - rds:DescribeDBInstances
+                  - rds:ModifyDBInstance
+                  - rds:ListTagsForResource
+                Resource: "*"
+
+  APILambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: APILambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: APIPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt MisconfiguredResourcesTable.Arn
+                  - !GetAtt RemediationActionsTable.Arn
+                  - !GetAtt CompletedRemediationsTable.Arn
+                  - !GetAtt SeverityLevelsTable.Arn
+                  - !GetAtt NotificationsTable.Arn
+
+  # -------------------------------------------------------------------------------------
+  # Lambda Permissions for EventBridge
+  # -------------------------------------------------------------------------------------
+  SchedulerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RemediationSchedulerLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RemediationSchedulerRule.Arn
+
+  # -------------------------------------------------------------------------------------
+  # Lambda Permissions for Api
+  # -------------------------------------------------------------------------------------
+  DashboardFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DashboardDataFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/GET/dashboard"
+
+  ScheduledRemediationsFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ScheduledRemediationsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/GET/remediations/scheduled"
+
+  HistoricalRemediationsFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HistoricalRemediationsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/GET/remediations/historical"
+
+# -------------------------------------------------------------------------------------
+# Outputs
+# -------------------------------------------------------------------------------------
 Outputs:
-  ApiEndpoint:
-    Description: API Gateway endpoint URL
-    Value: !Join 
-      - ''
-      - - 'https://'
-        - !Ref ApiGatewayApi
-        - '.execute-api.'
-        - !Ref AWS::Region
-        - '.amazonaws.com/Prod'
+  RemediationNotificationTopicArn:
+    Description: "ARN of the SNS topic for remediation notifications"
+    Value: !Ref RemediationNotificationTopic
     Export:
-      Name: !Sub "${AWS::StackName}-ApiEndpoint"
-
-  # DynamoDB Table Names
-  MisconfiguredResourcesTableName:
-    Description: MisconfiguredResources table name
-    Value: !Ref MisconfiguredResourcesTable
-    Export:
-      Name: !Sub "${AWS::StackName}-MisconfiguredResourcesTable"
-
-  SeverityLevelsTableName:
-    Description: SeverityLevels table name
-    Value: !Ref SeverityLevelsTable
-    Export:
-      Name: !Sub "${AWS::StackName}-SeverityLevelsTable"
-
-  RemediationActionsTableName:
-    Description: RemediationActions table name
-    Value: !Ref RemediationActionsTable
-    Export:
-      Name: !Sub "${AWS::StackName}-RemediationActionsTable"
-
-  CompletedRemediationsTableName:
-    Description: CompletedRemediations table name
-    Value: !Ref CompletedRemediationsTable
-    Export:
-      Name: !Sub "${AWS::StackName}-CompletedRemediationsTable"
-
-  NotificationsTableName:
-    Description: Notifications table name
-    Value: !Ref NotificationsTable
-    Export:
-      Name: !Sub "${AWS::StackName}-NotificationsTable"
+      Name: !Sub "${AWS::StackName}-NotificationTopicArn"
 
   ComplianceDefinitionsTableName:
-    Description: ComplianceDefinitions table name
+    Description: "Name of the ComplianceDefinitions table"
     Value: !Ref ComplianceDefinitionsTable
     Export:
       Name: !Sub "${AWS::StackName}-ComplianceDefinitionsTable"
 
-  # Create Table ARNs (useful for IAM policies to define ARN of associated Table)
-  MisconfiguredResourcesTableArn:
-    Description: MisconfiguredResources table ARN
-    Value: !GetAtt MisconfiguredResourcesTable.Arn
+  MisconfiguredResourcesTableName:
+    Description: "Name of the MisconfiguredResources table"
+    Value: !Ref MisconfiguredResourcesTable
     Export:
-      Name: !Sub "${AWS::StackName}-MisconfiguredResourcesTableArn"
+      Name: !Sub "${AWS::StackName}-MisconfiguredResourcesTable"
 
-  RemediationActionsTableArn:
-    Description: RemediationActions table ARN
-    Value: !GetAtt RemediationActionsTable.Arn
+  RemediationActionsTableName:
+    Description: "Name of the RemediationActions table"
+    Value: !Ref RemediationActionsTable
     Export:
-      Name: !Sub "${AWS::StackName}-RemediationActionsTableArn"
+      Name: !Sub "${AWS::StackName}-RemediationActionsTable"
 
-  # API Resources
-  GetRemediationsApi:
-    Description: API Gateway GET remediations endpoint
-    Value: !Join 
-      - ''
-      - - 'https://'
-        - !Ref ApiGatewayApi
-        - '.execute-api.'
-        - !Ref AWS::Region
-        - '.amazonaws.com/Prod/remediations'
-    Export:
-      Name: !Sub "${AWS::StackName}-GetRemediationsApi"
-
-  CreateRemediationApi:
-    Description: API Gateway POST remediation endpoint
-    Value: !Join 
-      - ''
-      - - 'https://'
-        - !Ref ApiGatewayApi
-        - '.execute-api.'
-        - !Ref AWS::Region
-        - '.amazonaws.com/Prod/remediations'
-    Export:
-      Name: !Sub "${AWS::StackName}-CreateRemediationApi"
-
-  # Stack Information
   StackRegion:
-    Description: Region where the stack is deployed
+    Description: "Region where the stack is deployed"
     Value: !Ref AWS::Region
     Export:
       Name: !Sub "${AWS::StackName}-Region"
 
   StackName:
-    Description: Name of the stack
+    Description: "Name of the stack"
     Value: !Ref AWS::StackName
     Export:
       Name: !Sub "${AWS::StackName}-Name"
+
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+
+  DashboardApiUrl:
+    Description: "Dashboard API endpoint"
+    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/dashboard"
+    Export:
+      Name: !Sub "${AWS::StackName}-DashboardApiUrl"
+
+  ScheduledRemediationsApiUrl:
+    Description: "Scheduled Remediations API endpoint"
+    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/remediations/scheduled"
+    Export:
+      Name: !Sub "${AWS::StackName}-ScheduledRemediationsApiUrl"
+
+  HistoricalRemediationsApiUrl:
+    Description: "Historical Remediations API endpoint"
+    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/remediations/historical"
+    Export:
+      Name: !Sub "${AWS::StackName}-HistoricalRemediationsApiUrl"

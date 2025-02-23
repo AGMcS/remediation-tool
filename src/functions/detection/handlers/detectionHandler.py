@@ -1,12 +1,10 @@
 import boto3
-import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
-from botocore.exceptions import ClientError
-from common.dbHandler import DbHandler
-from common.notificationHandler import NotificationHandler
+from typing import Dict, Any
+from dbHandler import DbHandler
+from notificationHandler import NotificationHandler
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -164,19 +162,19 @@ class DetectionHandler:
             logger.warning(f"Failed to get resource owner info: {str(e)}")
             return {'email': None, 'team': 'Unknown'}
         
-    def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-        """
-        Lambda entry point for processing compliance violations.
-        """
-        try:
-            handler = DetectionHandler()
-            return handler.processComplianceViolation(event)
-        
-        except Exception as e:
-            logger.error(f"Error in lambdaHandler: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': {
-                    'error': str(e)
-                }
+def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Lambda entry point for processing compliance violations.
+    """
+    try:
+        handler = DetectionHandler()
+        return handler.processComplianceViolation(event)
+    
+    except Exception as e:
+        logger.error(f"Error in lambdaHandler: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': str(e)
             }
+        }

@@ -2,9 +2,9 @@ import boto3
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
-from common.awsUtils import AWSServiceHandler
-from common.dbHandler import DbHandler
-from common.notificationHandler import NotificationHandler
+from awsUtils import AWSServiceHandler
+from dbHandler import DbHandler
+from notificationHandler import NotificationHandler
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -257,20 +257,20 @@ class EBSEncryptionRemediationHandler:
         except Exception as e:
             logger.error(f"Error copying volume tags: {str(e)}")
 
-    def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-        """
-        Lambda entry point for EBS encryption remediation.
-        Triggered by the remediation scheduler when a remediation is due.
-        """
-        try:
-            handler = EBSEncryptionRemediationHandler()
-            return handler.ebsEncryptionRemediation(event)
-        except Exception as e:
-            logger.error(f"Error in lambda Handler for EBS encryption: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': {
-                    'error': str(e)
-                }
+def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Lambda entry point for EBS encryption remediation.
+    Triggered by the remediation scheduler when a remediation is due.
+    """
+    try:
+        handler = EBSEncryptionRemediationHandler()
+        return handler.ebsEncryptionRemediation(event)
+    except Exception as e:
+        logger.error(f"Error in lambda Handler for EBS encryption: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': {
+                'error': str(e)
             }
+        }
                 

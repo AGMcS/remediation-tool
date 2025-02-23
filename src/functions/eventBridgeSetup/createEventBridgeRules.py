@@ -130,7 +130,7 @@ class EventBridgeRuleCreation:
             logger.info(f"Creating/updating EventBridge rule: {ruleName}")
             self.events.put_rule(
                 Name =ruleName,
-                Description=f"Compliance rule for {compilanceRule.get('Title, N/A')}",
+                Description=f"Compliance rule for {compilanceRule.get('Title', 'N/A')}",
                 EventPattern=json.dumps(eventPattern),
                 State='ENABLED'
             )
@@ -157,12 +157,15 @@ class EventBridgeRuleCreation:
 
             # Add Lambda permissions for EventBridge
             try:
+                region = lambdaArn.split(":")[3]
+                accountId = lambdaArn.split(":")[4]
+
                 self.lambdaClient.add_permission(
                     FunctionName=lambdaArn,
                     StatementId=f"{ruleName}-permission",
                     Action='lambda:InvokeFunction',
                     Principal='events.amazonaws.com',
-                    SourceArn=f"arn:aws:events:{os.environ.get('AWS_REGION')}:{os.environ.get('AWS_ACCOUNT_ID')}:rule/{ruleName}"
+                    SourceArn=f"arn:aws:events:{region}:{accountId}:rule/{ruleName}"
                 )
             except ClientError as e:
                 if e.response['Error']['Code'] != 'ResourceConflictException':
@@ -186,25 +189,25 @@ class EventBridgeRuleCreation:
                 logger.error(f"Error processing rule {rule.get('ComplianceID')}: {str(e)}")
                 continue
     
-    def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-        """
-        Lambda entry point for creating EventBridge rules.
-        """
-        try:
-            creator = EventBridgeRuleCreation()
-            creator.processAllRules()
+def lambdaHandler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """
+    Lambda entry point for creating EventBridge rules.
+    """
+    try:
+        creator = EventBridgeRuleCreation()
+        creator.processAllRules()
 
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'Successfully created/updated EventBridge rules'
-                })
-            }
-        except Exception as e:
-            logger.error(f"Error in lambdaHandler: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({
-                    'error': str(e)
-                })
-            }              
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'Successfully created/updated EventBridge rules'
+            })
+        }
+    except Exception as e:
+        logger.error(f"Error in lambdaHandler: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'error': str(e)
+            })
+        }              
